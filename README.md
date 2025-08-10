@@ -18,4 +18,4 @@ The data dumps in this repository are formatted as RDF, making them compatible w
 
 ## License
 
-This data is provided under the terms specified in the repository's license file.
+This data is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.

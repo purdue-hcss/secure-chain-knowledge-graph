@@ -5,27 +5,15 @@ This folder contains the complete data processing pipeline for the **SecureChain
 ```
 integration/
 ├─ kg_construction/       # Build the graph from prepared resources
-├─ knowledge_extraction/  # Scripts to collect/normalize input data
 └─ relation_extraction/   # Entity & relationship extraction (UniNER / WikiSER / LLM glue)
 ```
 
 The pipeline follows a three-stage workflow:
 
-1.  **Knowledge Extraction**: Gathers data from structured and semi-structured sources.
-2.  **Relation Extraction**: Extracts entities and relationships from unstructured text using NER models.
-3.  **Knowledge Graph Construction**: Maps the extracted data to our ontology and builds the final graph.
+1.  **Relation Extraction**: Extracts entities and relationships from unstructured text using NER models.
+2.  **Knowledge Graph Construction**: Maps the extracted data to our ontology and builds the final graph.
 
 ## 🗂️ Directories
-
-### 📁 `knowledge_extraction/`
-
-This module focuses on collecting information from well-defined, structured sources. Each script is tailored to a specific data provider, such as package managers, code repositories, and security databases.
-
-* **Key Responsibilities**:
-    * Crawling package metadata from **Conan**, **Debian**, and **GitHub**.
-    * Parsing security advisories and product information from **NVD**, including **CVE**, **CPE**, and **CWE** databases.
-    * Enriching entities by matching them with external knowledge bases like **Wikipedia** and **DBpedia**.
-* **Output**: A collection of processed, intermediate data files (usually in CSV or JSON format) ready for the construction phase.
 
 ### 📁 `relation_extraction/`
 

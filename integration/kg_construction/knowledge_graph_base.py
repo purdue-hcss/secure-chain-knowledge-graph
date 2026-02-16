@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Iterable
 
 from knowledge_graph_constant import (
@@ -17,7 +16,6 @@ from knowledge_graph_constant import (
 from rdflib import OWL, RDF, RDFS, BNode, Graph, Literal, URIRef
 from rdflib.collection import Collection
 
-KNOWLEDGE_GRAPH_SAVING_PATH = "resources/graph/secure-chain.nt"
 
 
 def bind_prefixes(g: Graph):
@@ -102,31 +100,9 @@ def add_ns_properties(g: Graph):
     g.add((PROPERTY_ECOSYSTEM, RDFS.range, SCHEMA.Text))
 
 
-def construct_graph() -> Graph:
+def construct_base_graph() -> Graph:
     graph = Graph()
     bind_prefixes(graph)
     add_classes(graph)
     add_ns_properties(graph)
     return graph
-
-
-def save_graph(g: Graph, file_path: str, buffer_size=1 << 20):
-    Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-    # g.serialize(destination=file_path, format="turtle")
-    g.serialize(
-        destination=file_path,
-        format="nt",
-        encoding="utf-8",
-        buffering=buffer_size,
-    )
-
-
-def main():
-    graph = construct_graph()
-
-    print("Saving graph...")
-    save_graph(graph, KNOWLEDGE_GRAPH_SAVING_PATH)
-
-
-if __name__ == "__main__":
-    main()

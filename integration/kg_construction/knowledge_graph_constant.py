@@ -1,7 +1,9 @@
+import gzip
+from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import quote_plus
-from rdflib import Namespace, URIRef
 
+from rdflib import Namespace, URIRef
 
 NS = Namespace("https://w3id.org/secure-chain/")
 SCHEMA = Namespace("http://schema.org/")
@@ -32,6 +34,7 @@ PROPERTY_NAME = SCHEMA.name
 PROPERTY_PRODUCER = SCHEMA.producer
 PROPERTY_VULNERABILITY_TYPE = NS.vulnerabilityType
 PROPERTY_VULNERABLE_TO = NS.vulnerableTo
+PROPERTY_CPE23 = NS.cpe23
 
 PROPERTY_URL = SCHEMA.url
 PROPERTY_VERSION_NAME = NS.versionName
@@ -52,6 +55,27 @@ DEPS_DEV_ECOSYSTEMS: Dict[str, Dict[str, Any]] = {
         "pkg_ns": "https://pypi.org/project/",
         "ver_base": "https://pypi.org/project/",
         "upper": str,  # PyPI 包名区分大小写
+    },
+    "npm": {  # JavaScript / npm
+        "lang": "JavaScript",
+        "eco": "npm",
+        "pkg_ns": "https://www.npmjs.com/package/",
+        "ver_base": "https://www.npmjs.com/package/",
+        "upper": str,  # npm 包名区分大小写
+    },
+    "maven": {  # Java / Maven Central
+        "lang": "Java",
+        "eco": "Maven",
+        "pkg_ns": "https://mvnrepository.com/artifact/",
+        "ver_base": "https://mvnrepository.com/artifact/",
+        "upper": str,  # Maven 包名区分大小写
+    },
+    "go": {  # Go / pkg.go.dev
+        "lang": "Go",
+        "eco": "Go",
+        "pkg_ns": "https://pkg.go.dev/",
+        "ver_base": "https://pkg.go.dev/",
+        "upper": str,  # Go 包名区分大小写
     },
 }
 
@@ -134,3 +158,16 @@ def cve_uri(cve_id: str) -> URIRef:
 
 def cwe_uri(cwe_id: str) -> URIRef:
     return URIRef(f"{CWE_NS_NEW}{quote_plus(cwe_id, safe='.-+~*')}.html")
+
+
+def _open_text_maybe_gz(fp: Path):
+    if fp.suffix == ".gz" or fp.name.endswith(".jsonl.gz"):
+        return gzip.open(fp, mode="rt", encoding="utf-8")
+    return open(fp, mode="r", encoding="utf-8")
+
+
+def _worker_id():
+    import multiprocessing as mp
+
+    ident = mp.current_process()._identity
+    return (ident[0] - 1) if ident else 0

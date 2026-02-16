@@ -1,5 +1,10 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
+import os
+from pathlib import Path
 import re
+import tempfile
+from threading import RLock
 from typing import Optional
 from urllib.parse import quote_plus
 
@@ -16,6 +21,8 @@ from knowledge_graph_constant import (
     PROPERTY_URL,
     PROPERTY_VERSION_NAME,
     SCHEMA,
+    _open_text_maybe_gz,
+    _worker_id,
     conan_pkg_uri,
     conan_version_uri,
     debian_pkg_uri,
@@ -179,43 +186,124 @@ def add_license(
     return lic_ref
 
 
-def add_deps_dev_software_version_relations(
-    g: Graph, jsonl_path: str, ecosystem: str
-) -> None:
-    cfg = DEPS_DEV_ECOSYSTEMS[ecosystem]
-    seen_soft, seen_ver, seen_lic = set(), set(), set()
+def _process_one_file_to_nt(fp_str: str, ecosystem: str, cfg: dict) -> tuple[str, str, int]:
+    """
+    worker：处理单个文件，构建局部 Graph，输出到临时 .nt 文件
+    返回 (原文件名, nt_file_path)
+    """
+    fp = Path(fp_str)
 
-    with open(jsonl_path, encoding="utf-8") as f:
-        for line in tqdm(f, desc=f"Adding {ecosystem} packages"):
+    # 给每个 worker 一个自己的进度条位置（主进度条用 position=0）
+    wid = _worker_id()
+    pos = wid + 1
+
+    pbar = tqdm(
+        desc=f"{fp.name}",
+        unit="rec",
+        position=pos,
+        leave=False,   # worker 结束就消失，屏幕更干净
+        dynamic_ncols=True,
+    )
+
+    g_local = Graph()
+    seen_soft, seen_ver, seen_lic = set(), set(), set()
+    rec_count = 0
+
+    with _open_text_maybe_gz(fp) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec_count += 1
+            pbar.update(1)
+
             item = json.loads(line)
-            name = item["Name"].strip()
-            version = item["Version"].strip()
-            licenses = item.get("Licenses", [])
-            urls = [lnk["URL"] for lnk in item.get("Links", []) if "URL" in lnk]
+
+            if item.get("System") and item["System"] != ecosystem.upper():
+                continue
+
+            name = (item.get("Name") or "").strip()
+            version = (item.get("Version") or "").strip()
+            if not name or not version:
+                continue
+
+            licenses = item.get("Licenses", []) or []
+            urls = [
+                lnk["URL"]
+                for lnk in (item.get("Links") or [])
+                if isinstance(lnk, dict) and "URL" in lnk
+            ]
 
             soft_uri = deps_dev_pkg_uri(ecosystem, name)
             if soft_uri not in seen_soft:
-                g.add((soft_uri, RDF.type, NS.Software))
-                g.add((soft_uri, PROPERTY_NAME, Literal(name)))
-                g.add((soft_uri, PROPERTY_PROGRAMMING_LANGUAGE, Literal(cfg["lang"])))
-                g.add((soft_uri, PROPERTY_ECOSYSTEM, Literal(cfg["eco"])))
+                g_local.add((soft_uri, RDF.type, NS.Software))
+                g_local.add((soft_uri, PROPERTY_NAME, Literal(name)))
+                g_local.add(
+                    (soft_uri, PROPERTY_PROGRAMMING_LANGUAGE, Literal(cfg["lang"]))
+                )
+                g_local.add((soft_uri, PROPERTY_ECOSYSTEM, Literal(cfg["eco"])))
                 seen_soft.add(soft_uri)
 
             ver_uri_ = deps_dev_ver_uri(ecosystem, name, version)
             if ver_uri_ not in seen_ver:
-                g.add((ver_uri_, RDF.type, NS.SoftwareVersion))
-                g.add((ver_uri_, PROPERTY_VERSION_NAME, Literal(version)))
-                g.add((soft_uri, PROPERTY_HAS_SOFTWARE_VERSION, ver_uri_))
+                g_local.add((ver_uri_, RDF.type, NS.SoftwareVersion))
+                g_local.add((ver_uri_, PROPERTY_VERSION_NAME, Literal(version)))
+                g_local.add((soft_uri, PROPERTY_HAS_SOFTWARE_VERSION, ver_uri_))
 
                 for u in urls:
-                    g.add((ver_uri_, PROPERTY_URL, Literal(u)))
+                    if u:
+                        g_local.add((ver_uri_, PROPERTY_URL, Literal(u)))
 
                 for lic_expr in licenses:
-                    for tok in re.split(r"\s+(?:OR|AND|\||\&)\s*", lic_expr):
+                    if not lic_expr:
+                        continue
+                    for tok in re.split(r"\s+(?:OR|AND|\||\&)\s*", str(lic_expr)):
                         tok = tok.strip()
                         if not tok:
                             continue
-                        lic_uri = add_license(g, seen_lic, tok)
+                        lic_uri = add_license(g_local, seen_lic, tok)
                         if lic_uri:
-                            g.add((ver_uri_, PROPERTY_LICENSE, lic_uri))
+                            g_local.add((ver_uri_, PROPERTY_LICENSE, lic_uri))
+
                 seen_ver.add(ver_uri_)
+
+    pbar.close()
+
+    # 写临时 nt 文件（N-Triples 合并最简单）
+    fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix=f"depsdev_{fp.stem}_")
+    os.close(fd)
+    g_local.serialize(destination=nt_path, format="nt", encoding="utf-8")
+    return fp.name, nt_path, rec_count
+
+
+def add_deps_dev_software_version_from_dir(
+    versions_dir_path: str, ecosystem: str, max_workers: Optional[int] = 4
+) -> list[str]:
+    print(f"Adding deps.dev {ecosystem} packages from {versions_dir_path} ...")
+
+    cfg = DEPS_DEV_ECOSYSTEMS[ecosystem]
+    files = sorted(Path(versions_dir_path).glob("*.jsonl*"))
+    if not files:
+        return []
+
+    max_workers = max_workers or (os.cpu_count() or 4)
+
+    tqdm.set_lock(RLock())
+
+    tmp_nt_files = []
+    total_pbar = tqdm(desc=f"Streaming {ecosystem} packages", unit="rec", position=0, dynamic_ncols=True)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futs = [ex.submit(_process_one_file_to_nt, str(fp), ecosystem, cfg) for fp in files]
+        for fut in as_completed(futs):
+            fname, nt_path, rec_count = fut.result()
+            tmp_nt_files.append(nt_path)
+            total_pbar.update(rec_count)
+            total_pbar.set_postfix(file=fname)
+
+    total_pbar.close()
+
+    return tmp_nt_files  # 返回生成的 nt 文件列表，后续由调用者合并并清理
+
+    # for nt_path in tqdm(tmp_nt_files, desc="Merging graphs", unit="file", position=0, dynamic_ncols=True):
+    #     g.parse(nt_path, format="nt")
+    #     os.remove(nt_path)

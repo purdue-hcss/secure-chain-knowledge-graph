@@ -1,12 +1,15 @@
 import json
+import os
 import re
-from typing import Dict, List
+import tempfile
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+from threading import RLock
+from typing import Dict, List, Optional
 from urllib.parse import quote_plus
-from debian.debian_support import Version
-import pandas as pd
-from rdflib import RDF, Graph, Literal, URIRef
-from tqdm import tqdm
 
+import pandas as pd
+from debian.debian_support import Version
 from knowledge_graph_constant import (
     DEPS_DEV_ECOSYSTEMS,
     NS,
@@ -16,6 +19,8 @@ from knowledge_graph_constant import (
     PROPERTY_NAME,
     PROPERTY_PROGRAMMING_LANGUAGE,
     PROPERTY_VERSION_NAME,
+    _open_text_maybe_gz,
+    _worker_id,
     conan_version_uri,
     debian_version_uri,
     deps_dev_pkg_uri,
@@ -23,6 +28,8 @@ from knowledge_graph_constant import (
     github_version_uri,
     google_search_uri,
 )
+from rdflib import RDF, Graph, Literal, URIRef
+from tqdm import tqdm
 
 _cmp_re: re.Pattern[str] = re.compile(r"^\s*(>=|<=|>>|<<|>|<|=)?\s*([^,&\s]+)\s*$")
 
@@ -202,17 +209,41 @@ def cmp_version_obj(va: Version, vb: Version) -> int:
     return 0
 
 
-def add_deps_dev_depends_on_relations(
-    g: Graph, deps_jsonl_path: str, ecosystem: str
-) -> None:
-    cfg = DEPS_DEV_ECOSYSTEMS[ecosystem]
-    seen_soft, seen_ver, seen_edge = set(), set(), set()
+def _process_one_deps_file_to_nt(
+    fp_str: str, ecosystem: str, cfg: dict
+) -> tuple[str, str, int]:
+    """
+    worker：处理单个 dependsOn 文件，构建局部图，写出 nt。
+    返回 (原文件名, nt_path, record_count)
+    """
+    fp = Path(fp_str)
 
-    with open(deps_jsonl_path, encoding="utf-8") as f:
-        for line in tqdm(f, desc=f"Adding {ecosystem} dependsOn edges"):
+    # 主进度条 position=0；worker 从 1 开始
+    wid = _worker_id()
+    pos = wid + 1
+
+    # worker 内进度条（实时更新）
+    wbar = tqdm(
+        desc=f"{fp.name}",
+        unit="rec",
+        position=pos,
+        leave=False,
+        dynamic_ncols=True,
+    )
+
+    g_local = Graph()
+    seen_soft, seen_ver, seen_edge = set(), set(), set()
+    rec_count = 0
+
+    with _open_text_maybe_gz(fp) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            rec_count += 1
+            wbar.update(1)
+
             rec = json.loads(line)
-            frm = rec["From"]
-            to = rec["To"]
+            frm, to = rec.get("From", {}), rec.get("To", {})
 
             if (
                 frm.get("System") != ecosystem.upper()
@@ -220,27 +251,101 @@ def add_deps_dev_depends_on_relations(
             ):
                 continue
 
-            fname, fver = frm["Name"].strip(), frm["Version"].strip()
-            tname, tver = to["Name"].strip(), to["Version"].strip()
+            fname_f, fver = (
+                (frm.get("Name", "") or "").strip(),
+                (frm.get("Version", "") or "").strip(),
+            )
+            tname, tver = (
+                (to.get("Name", "") or "").strip(),
+                (to.get("Version", "") or "").strip(),
+            )
+            if not (fname_f and fver and tname and tver):
+                continue
 
-            frm_uri = deps_dev_ver_uri(ecosystem, fname, fver)
+            frm_uri = deps_dev_ver_uri(ecosystem, fname_f, fver)
 
+            # To side software + version
             tsoft_uri = deps_dev_pkg_uri(ecosystem, tname)
             if tsoft_uri not in seen_soft:
-                g.add((tsoft_uri, RDF.type, NS.Software))
-                g.add((tsoft_uri, PROPERTY_NAME, Literal(tname)))
-                g.add((tsoft_uri, PROPERTY_PROGRAMMING_LANGUAGE, Literal(cfg["lang"])))
-                g.add((tsoft_uri, PROPERTY_ECOSYSTEM, Literal(cfg["eco"])))
+                g_local.add((tsoft_uri, RDF.type, NS.Software))
+                g_local.add((tsoft_uri, PROPERTY_NAME, Literal(tname)))
+                g_local.add(
+                    (tsoft_uri, PROPERTY_PROGRAMMING_LANGUAGE, Literal(cfg["lang"]))
+                )
+                g_local.add((tsoft_uri, PROPERTY_ECOSYSTEM, Literal(cfg["eco"])))
                 seen_soft.add(tsoft_uri)
 
             tver_uri = deps_dev_ver_uri(ecosystem, tname, tver)
             if tver_uri not in seen_ver:
-                g.add((tver_uri, RDF.type, NS.SoftwareVersion))
-                g.add((tver_uri, PROPERTY_VERSION_NAME, Literal(tver)))
-                g.add((tsoft_uri, PROPERTY_HAS_SOFTWARE_VERSION, tver_uri))
+                g_local.add((tver_uri, RDF.type, NS.SoftwareVersion))
+                g_local.add((tver_uri, PROPERTY_VERSION_NAME, Literal(tver)))
+                g_local.add((tsoft_uri, PROPERTY_HAS_SOFTWARE_VERSION, tver_uri))
                 seen_ver.add(tver_uri)
 
             edge = (frm_uri, PROPERTY_DEPENDS_ON, tver_uri)
             if edge not in seen_edge:
-                g.add(edge)
+                g_local.add(edge)
                 seen_edge.add(edge)
+
+    wbar.close()
+
+    fd, nt_path = tempfile.mkstemp(suffix=".nt", prefix=f"depsdev_dep_{fp.stem}_")
+    os.close(fd)
+    g_local.serialize(destination=nt_path, format="nt", encoding="utf-8")
+    return fp.name, nt_path, rec_count
+
+
+def add_deps_dev_depends_on_from_dir(
+    deps_dir_path: str, ecosystem: str, max_workers: Optional[int] = 4
+) -> list[str]:
+    """
+    从目录读取多个 deps.dev 导出的 *.jsonl.gz / *.jsonl 文件，
+    为同一 ecosystem 批量添加 dependsOn 关系与相关实体。
+    """
+    print(f"Adding deps.dev {ecosystem} dependsOn edges from {deps_dir_path} ...")
+    cfg = DEPS_DEV_ECOSYSTEMS[ecosystem]
+
+    files = sorted(Path(deps_dir_path).glob("*.jsonl*"))
+    if not files:
+        return []
+
+    max_workers = max_workers or (os.cpu_count() or 4)
+
+    tqdm.set_lock(RLock())
+
+    tmp_nt_files: list[str] = []
+
+    total = tqdm(
+        desc=f"Streaming {ecosystem} dependsOn edges",
+        unit="record",
+        position=0,
+        dynamic_ncols=True,
+    )
+
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futs = [
+            ex.submit(_process_one_deps_file_to_nt, str(fp), ecosystem, cfg)
+            for fp in files
+        ]
+
+        for fut in as_completed(futs):
+            fname, nt_path, rec_count = fut.result()
+            tmp_nt_files.append(nt_path)
+
+            # 总进度条更新 + 显示当前完成的文件
+            total.update(rec_count)
+            total.set_postfix(file=fname)
+
+    total.close()
+
+    return tmp_nt_files  # 返回生成的 nt 文件列表，后续由调用者合并并清理
+
+    # # 合并阶段（顺序）
+    # for nt_path in tqdm(
+    #     tmp_nt_files, desc="Merging graphs", unit="file", position=0, dynamic_ncols=True
+    # ):
+    #     g.parse(nt_path, format="nt")
+    #     try:
+    #         os.remove(nt_path)
+    #     except OSError:
+    #         pass

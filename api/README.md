@@ -19,7 +19,7 @@ http://<host>:<port>
 Example:
 
 ```
-http://localhost:8000
+https://purdue-hcss.github.io/nsf-software-supply-chain_security/api
 ```
 
 ---
@@ -57,14 +57,14 @@ Retrieve dependencies for a given library and version.
 
 ### Direct dependencies (default)
 
-```bash
-curl "http://localhost:8000/dependencies?library_name=ffmpeg&library_version=4.2.1"
+```
+https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependencies?library_name=pandas&library_version=2.2.3
 ```
 
 ### Indirect dependencies
 
-```bash
-curl "http://localhost:8000/dependencies?library_name=ffmpeg&library_version=4.2.1&transitive=true"
+```
+https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependencies?library_name=pandas&library_version=2.2.3&transitive=true
 ```
 
 ---
@@ -73,17 +73,27 @@ curl "http://localhost:8000/dependencies?library_name=ffmpeg&library_version=4.2
 
 ```json
 {
-  "libraryName": "ffmpeg",
-  "libraryVersionName": "4.2.1",
-  "ecosystemFilter": "Conan",
+  "libraryName": "pandas",
+  "libraryVersionName": "2.2.3",
+  "ecosystemFilter": null,
   "transitive": false,
-  "ecosystem": "Conan",
-  "count": 2,
+  "ecosystem": "PyPI",
+  "count": 3,
   "dependencies": [
     {
-      "dependencyName": "zlib",
-      "dependencyVersionName": "1.2.13",
-      "dependencyEcosystem": "Conan"
+      "dependencyName": "numpy",
+      "dependencyVersionName": "2.2.5",
+      "dependencyEcosystem": "PyPI"
+    },
+    {
+      "dependencyName": "python-dateutil",
+      "dependencyVersionName": "2.9.0.post0",
+      "dependencyEcosystem": "PyPI"
+    },
+    {
+      "dependencyName": "tzdata",
+      "dependencyVersionName": "2025.2.0",
+      "dependencyEcosystem": "PyPI"
     }
   ]
 }
@@ -136,8 +146,8 @@ Unlike `/dependencies`, this endpoint:
 
 ## Request Example
 
-```bash
-curl "http://localhost:8000/dependency-tree?library_name=ffmpeg&library_version=4.2.1"
+```
+https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependency-tree?library_name=pandas&library_version=2.2.3
 ```
 
 ---
@@ -146,34 +156,49 @@ curl "http://localhost:8000/dependency-tree?library_name=ffmpeg&library_version=
 
 ```json
 {
-  "libraryName": "ffmpeg",
-  "libraryVersionName": "4.2.1",
-  "ecosystemFilter": "Conan",
-  "maxDepth": 3,
+  "libraryName": "pandas",
+  "libraryVersionName": "2.2.3",
+  "ecosystemFilter": null,
+  "maxDepth": 10,
   "includeRoot": true,
+  "deduped": true,
   "dedupStrategy": "by_version",
   "cycleStrategy": "cut",
   "nodeCount": 5,
   "tree": {
-    "name": "ffmpeg",
-    "version": "4.2.1",
-    "ecosystem": "Conan",
+    "name": "pandas",
+    "version": "2.2.3",
+    "ecosystem": "PyPI",
     "depth": 0,
     "children": [
       {
-        "name": "zlib",
-        "version": "1.2.13",
-        "ecosystem": "Conan",
+        "name": "numpy",
+        "version": "2.2.5",
+        "ecosystem": "PyPI",
+        "depth": 1,
+        "children": []
+      },
+      {
+        "name": "python-dateutil",
+        "version": "2.9.0.post0",
+        "ecosystem": "PyPI",
         "depth": 1,
         "children": [
           {
-            "name": "miniz",
-            "version": "3.0.0",
-            "ecosystem": "Conan",
+            "name": "six",
+            "version": "1.17.0",
+            "ecosystem": "PyPI",
             "depth": 2,
             "children": []
           }
         ]
+      },
+      {
+        "name": "tzdata",
+        "version": "2025.2.0",
+        "ecosystem": "PyPI",
+        "depth": 1,
+        "children": []
       }
     ]
   }

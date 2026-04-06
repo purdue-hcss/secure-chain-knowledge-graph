@@ -5,6 +5,7 @@ The API supports:
 
 * Flat dependency queries (direct or indirect)
 * Full nested dependency tree queries
+* Reverse dependency queries (dependents)
 * Optional ecosystem filtering
 * Depth-aware dependency traversal
 
@@ -253,18 +254,108 @@ Include the node and mark:
 
 ---
 
+# 3️⃣ Reverse Dependency API
+
+## Endpoint
+
+### `GET /dependents`
+
+Retrieve all libraries that depend on a given library.
+
+---
+
+## Query Parameters
+
+| Parameter         | Type      | Required | Default | Description                                             |
+| ----------------- | --------- | -------- | ------- | ------------------------------------------------------- |
+| `library_name`    | `string`  | Yes      | –       | Target library name                                     |
+| `library_version` | `string`  | No       | `null`  | Optional version. If omitted, query across all versions |
+| `ecosystem`       | `string`  | No       | `null`  | Optional ecosystem filter                               |
+| `transitive`      | `boolean` | No       | `false` | Whether to return indirect dependents (≥2 hops)         |
+
+---
+
+## Behavior
+
+* If `library_version` is provided:
+
+  * Return dependents of that specific version
+
+* If `library_version` is omitted:
+
+  * Return dependents of **all versions**
+  * Each result may include:
+
+    * `targetLibraryVersionName`
+
+---
+
+## Request Examples
+
+```bash
+# Direct dependents
+curl "https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependents?library_name=zlib"
+
+# Indirect dependents
+curl "https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependents?library_name=zlib&transitive=true"
+
+# Specific version
+curl "https://purdue-hcss.github.io/nsf-software-supply-chain_security/api/dependents?library_name=zlib&library_version=1.2.13"
+```
+
+---
+
+## Response Example
+
+```json
+{
+  "libraryName": "zlib",
+  "libraryVersionName": null,
+  "ecosystemFilter": null,
+  "transitive": false,
+  "count": 2,
+  "dependents": [
+    {
+      "dependentName": "ffmpeg",
+      "dependentVersionName": "4.2.1",
+      "dependentEcosystem": "Conan",
+      "targetLibraryVersionName": "1.2.13"
+    }
+  ]
+}
+```
+
+---
+
+## Dependent Object
+
+| Field                      | Type   | Description                      |
+| -------------------------- | ------ | -------------------------------- |
+| `dependentName`            | string | Dependent library                |
+| `dependentVersionName`     | string | Dependent version                |
+| `dependentEcosystem`       | string | Ecosystem                        |
+| `targetLibraryVersionName` | string | Target version being depended on |
+
+---
+
 # SPARQL Semantics
 
-## Direct Dependency Pattern
+## Forward Dependency
 
 ```sparql
 ?libVersion sc:dependsOn ?dependencyVersion .
 ```
 
-## Indirect-Only Pattern
+## Reverse Dependency
 
 ```sparql
-?libVersion sc:dependsOn/sc:dependsOn+ ?dependencyVersion .
+?dependentVersion sc:dependsOn ?targetVersion .
+```
+
+## Indirect (≥2 hops)
+
+```sparql
+sc:dependsOn/sc:dependsOn+
 ```
 
 ## Tree Expansion Strategy
@@ -280,23 +371,20 @@ The tree API:
 
 # Error Responses
 
-### 400 Bad Request
-
-Invalid parameters.
-
-### 404 Not Found
-
-Root library/version not found or ecosystem mismatch.
-
-### 502 Bad Gateway
-
-SPARQL endpoint failure.
+| Code | Description               |
+| ---- | ------------------------- |
+| 400  | Invalid parameters        |
+| 404  | Library/version not found |
+| 502  | SPARQL endpoint error     |
 
 ---
 
 # Summary
 
-| Endpoint           | Purpose                      | Output                      |
-| ------------------ | ---------------------------- | --------------------------- |
-| `/dependencies`    | Flat dependency list         | Direct or indirect only     |
-| `/dependency-tree` | Full nested dependency graph | All dependencies with depth |
+| Endpoint           | Description                    |
+| ------------------ | ------------------------------ |
+| `/dependencies`    | Flat dependency list           |
+| `/dependency-tree` | Full dependency graph (nested) |
+| `/dependents`      | Reverse dependencies           |
+
+---

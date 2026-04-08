@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Literal, Optional
 import httpx
 from fastapi import HTTPException
 
-SPARQL_ENDPOINT = "https://frink.apps.renci.org/securechainkg/sparql"
+SPARQL_ENDPOINT = "https://hcss.cs.purdue.edu/securechain_graphdb/repositories/securechain"
 
 
 DedupStrategy = Literal["by_version", "by_name"]

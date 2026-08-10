@@ -6,3 +6,7 @@
 	path = integration/relation_extraction
 	url = https://github.com/HadiAskari/NSF-NER-RE
 	branch = main
+[submodule "aisecurechain"]
+	path = aisecurechain
+	url = https://github.com/magic-YuanTian/AISecureChain.git
+	branch = main

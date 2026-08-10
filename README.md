@@ -19,6 +19,9 @@ Welcome to the **SecureChain** project! This repository contains the tools and s
 * **🎨 I want a visual query helper:** see **[`visualization/README.md`](visualization/)**
   → Blockly-based SPARQL blocks to explore the graph visually.
 
+* **🤖 I care about AI/ML supply-chain vulnerabilities:** see **[`aisecurechain/`](https://github.com/magic-YuanTian/AISecureChain)**
+  → A companion knowledge graph covering AI-specific threats (prompt injection, model poisoning, agent misuse, …) extracted from advisories and threat intel with an LLM pipeline.
+
 * **📜 I want schema details:** see the **[ontology docs](https://purdue-hcss.github.io/secure-chain-ontology/)**
   → Full class/property hierarchy, with links to schema.org and other reused vocabularies.
 
@@ -48,12 +51,19 @@ The figure below demonstrates an example knowledge graph for software supply cha
 
 The knowledge graph canonically uses the namespace `https://w3id.org/secure-chain/` and extends `schema.org` with a small set of classes & properties for supply-chain security.
 
+## 🤖 AISecureChain: the AI/ML Arm
+
+**[AISecureChain](https://github.com/magic-YuanTian/AISecureChain)** (included here as the [`aisecurechain/`](aisecurechain/) submodule) extends the SecureChain effort to the **AI/ML supply chain**. While SecureChain answers *what depends on what, and which of it is vulnerable* across conventional ecosystems, AISecureChain covers the part that classic dependency analysis cannot reach — prompt injection, model poisoning, agent misuse and similar failures, where the vulnerability lives in model behaviour and the evidence exists only as narrative text.
+
+It crawls CVE records, vendor advisories and threat-intel feeds, uses an LLM to extract entities and relations against a fixed ontology built around the causal chain `Attack → Vulnerability → Impact`, and serves the result through REST and SPARQL APIs with a React front end. A [live demo](http://18.207.218.62:3508/) is available.
+
 ## 📂 Repository Structure
 
 This project is organized into several key directories. For detailed information on each component, please refer to the `README.md` file within the respective directory.
 
 ```
 └── SecureChain/
+    ├── aisecurechain/
     ├── integration/
     ├── kg/
     └── visualization/
@@ -64,6 +74,8 @@ This project is organized into several key directories. For detailed information
   * **[`kg/`](kg/):** Provides access to the knowledge graph data dumps, a live SPARQL endpoint, query examples, and detailed ontology information.
 
   * **[`visualization/`](visualization/):** Includes a web-based tool for visualizing SPARQL queries against the knowledge graph, making it easier to explore and understand the data.
+
+  * **[`aisecurechain/`](aisecurechain/):** A submodule tracking [AISecureChain](https://github.com/magic-YuanTian/AISecureChain), a knowledge graph of AI/ML supply-chain vulnerabilities — the AI counterpart to this repository.
 
 # 🙌 Contributing
 
